@@ -32,8 +32,8 @@ jobs:
 
       - name: Build and Tag Docker Image
         run: |
-          docker build -t ${{ secrets.ACR_NAME }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }} .
+          docker build -t ${{ secrets.REGISTrY }}/${{ github.event.repository.name }}:${{ github.sha }} .
         
       - name: Push Docker Image to ACR
         run: |
-          docker push ${{ secrets.ACR_NAME }}.azurecr.io/${{ github.event.repository.name }}:${{ github.sha }}
+          docker push ${{ secrets.REGISTrY }}/${{ github.event.repository.name }}:${{ github.sha }}
