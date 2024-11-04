@@ -1,1 +1,1 @@
-FROM hello-world
+FROM digitalocean/flask-helloworld
