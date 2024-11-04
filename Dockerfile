@@ -1,5 +1,6 @@
 FROM continuumio/miniconda3
 
+EXPOSE 5000
 COPY app app
 COPY env.yml env.yml
 RUN conda env create --file env.yml -n lectify-backend && conda init
