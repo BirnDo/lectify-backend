@@ -1,0 +1,61 @@
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Set env vars
+    - name: Set env vars
+      id: env-vars
+      run: |
+        if [ "${{ github.ref_name }}" == "main" ]; then
+          echo "NAMESPACE=prod" >> $GITHUB_ENV
+          echo "IMAGE=lectify-backend-prod:${{ github.sha }}" >> $GITHUB_ENV
+        elif [ "${{ github.ref_name }}" == "develop" ]; then
+          echo "NAMESPACE=dev" >> $GITHUB_ENV
+          echo "IMAGE=lectify-backend-dev:${{ github.sha }}" >> $GITHUB_ENV
+        fi
+
+    # Checkout the repository
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    # Log in to ACR
+    - name: Log in to ACR
+      uses: azure/docker-login@v1
+      with:
+        login-server: myregistry.azurecr.io
+        username: ${{ secrets.LECTIFYBACKEND_REGISTRY_USERNAME }}
+        password: ${{ secrets.LECTIFYBACKEND_REGISTRY_PASSWORD }}
+
+    # Build and push image
+    - name: Build and Push Docker Image
+      run: |
+        docker build -t lectifycr.azurecr.io/$IMAGE .
+        docker push lectifycr.azurecr.io/$IMAGE
+
+    # Set up kubectl
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.30.6' 
+
+    # Authenticate to Kubernetes Cluster
+    - name: Authenticate to Kubernetes Cluster
+      env:
+        KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+      run: |
+        echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
+
+    # Deploy to aks
+    - name: Deploy to aks
+      run: |
+        kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        kubectl set image deployment/lectify-backend lectify-backend=$IMAGE -n $NAMESPACE
