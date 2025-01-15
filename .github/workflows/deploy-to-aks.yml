@@ -41,21 +41,9 @@ jobs:
         docker build -t lectifycr.azurecr.io/$IMAGE .
         docker push lectifycr.azurecr.io/$IMAGE
 
-    # Set up kubectl
-    - name: Set up kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'v1.30.6' 
-
-    # Authenticate to Kubernetes Cluster
-    - name: Authenticate to Kubernetes Cluster
+    # create deployment
+    - uses: actions-hub/kubectl@master
       env:
         KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-      run: |
-        echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
-
-    # Deploy to aks
-    - name: Deploy to aks
-      run: |
-        kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-        kubectl set image deployment/lectify-backend lectify-backend=$IMAGE -n $NAMESPACE
+      with: 
+        args: set image deployment/lectify-backend lectify-backend=$IMAGE
