@@ -31,7 +31,7 @@ jobs:
     - name: Log in to ACR
       uses: azure/docker-login@v1
       with:
-        login-server: myregistry.azurecr.io
+        login-server: lectifycr.azurecr.io
         username: ${{ secrets.LECTIFYBACKEND_REGISTRY_USERNAME }}
         password: ${{ secrets.LECTIFYBACKEND_REGISTRY_PASSWORD }}
 
