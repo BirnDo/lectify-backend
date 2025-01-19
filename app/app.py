@@ -4,7 +4,6 @@ import tempfile
 from flask import Flask, jsonify, request
 from json import JSONEncoder
 from concurrent.futures import ThreadPoolExecutor
-import uuid
 import socket
 import jwt
 import openai
@@ -12,15 +11,14 @@ import ffmpeg
 import whisper
 from pymongo import MongoClient
 from bson import ObjectId
-from werkzeug.exceptions import RequestEntityTooLarge
-from werkzeug.utils import secure_filename
 
 
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'incredibly_secret_jwt_key'
+app.config['JWT_KEY'] = 'incredibly_secret_jwt_key'
 app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024 # 1000MB
-openai.api_key = "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"
+openai.api_key = os.getenv('OPENAI_API_KEY')
+executor = ThreadPoolExecutor(max_workers=5)
 
 class MongoJSONEncoder(JSONEncoder):
     def default(self, obj):
@@ -45,9 +43,9 @@ except Exception as e:
 def process():
     token = request.headers.get('Authorization').split(" ")[1]
     try:
-        user_id = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])['_id']
+        user_id = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])['_id']
         
-        with tempfile.NamedTemporaryFile(delete=True, suffix=".mp3", dir='./temp') as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", dir='./temp') as temp_file:
             temp_file.write(request.data)
             temp_file_path = temp_file.name
 
@@ -60,8 +58,9 @@ def process():
             
             result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
             print("Inserted transcription into database: ", result.inserted_id)
-            transcribe_and_summarize(user_id, result.inserted_id, temp_file_path, model, summaryType)
-        
+            print("starting threaded transcription and summarization")
+            executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
+            
         return '', 202
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
@@ -69,15 +68,19 @@ def process():
         return jsonify({'error': 'Invalid token'}), 401
 
 
-def transcribe_and_summarize(user_id, transcription_id, file_name, model, summaryType):
-    transcripted_text = transcribe.transcribe(file_name, model)
-    
-    summary = summarize.summarize(transcripted_text, summaryType)
+def transcribe_and_summarize(user_id, transcription_id, temp_file_path, model, summaryType):
+    print("starting transcription")
+    transcripted_text = transcribe(temp_file_path, model)
+    print("starting summarization")
+    summary = summarize(transcripted_text, summaryType)
 
     update_operation = { '$set' : 
         { 'completed' : True, 'transcriptionText' : transcripted_text, 'summaryText' : summary }
     }
     transcription_collection.update_one({'_id': transcription_id, 'user_id': user_id}, update_operation)
+    print("deleting temporary file:", temp_file_path)
+    os.remove(temp_file_path)
+
 
 def transcribe(path, model):
     model = whisper.load_model(model) # model has to be: tiny, base, small, medium, large
@@ -141,15 +144,6 @@ def entry():
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
         return jsonify({'error': 'Invalid token'}), 401
-    
-@app.route('/filetest', methods=['POST', 'PUT'])
-def filetest():
-    # Create a temporary file and write the body to it
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", mode='wb') as temp_file:
-        temp_file.write(request.data)
-        temp_file_path = temp_file.name
-
-    return f"Request body saved to temporary file: {temp_file_path}", 200
 
 if __name__ == '__main__':
     app.run(socket.gethostbyname(socket.gethostname()))
