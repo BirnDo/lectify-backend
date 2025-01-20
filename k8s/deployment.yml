@@ -42,6 +42,17 @@ spec:
               - ls
             initialDelaySeconds: 30
             periodSeconds: 30
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: openapi-key
+            - name: MONGODB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: mongo-connection-string
 
 ---
 
@@ -56,3 +67,12 @@ spec:
   ports:
     - port: 5000
   type: LoadBalancer
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+data:
+  openapi-key: changeme
+  mongo-connection-string: changeme
