@@ -64,7 +64,7 @@ def process():
             print("starting threaded transcription and summarization")
             executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
             
-        return '', 202
+        return jsonify({'entry_id': result.inserted_id}), 202
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
@@ -120,7 +120,7 @@ def login():
     if user is not None:
         token = jwt.encode({'_id': str(user['_id']), 
                             'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)},
-                           app.config['SECRET_KEY'], algorithm='HS256')
+                           app.config['JWT_KEY'], algorithm='HS256')
         return jsonify({'token': token})
     return jsonify({'error': 'Invalid credentials'}), 401
 
@@ -128,7 +128,7 @@ def login():
 def history():
     token = request.headers.get('Authorization').split(" ")[1]
     try:
-        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
         return jsonify({list(transcription_collection.find({'user_id': decoded['_id']}))})
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
@@ -145,7 +145,7 @@ def entry():
     token = request.headers.get('Authorization').split(" ")[1]
 
     try:
-        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
         return jsonify({list(transcription_collection.find({'user_id': decoded['_id'], '_id': entry_id}))})
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
