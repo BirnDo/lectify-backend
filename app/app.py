@@ -59,7 +59,7 @@ def process():
             model = request.args.get('model')
             summaryType = request.args.get('summaryType')
             
-            result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
+            result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'transcriptionQuality': model, 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
             print("Inserted transcription into database: ", result.inserted_id)
             print("starting threaded transcription and summarization")
             executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
