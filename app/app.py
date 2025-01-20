@@ -64,7 +64,7 @@ def process():
             print("starting threaded transcription and summarization")
             executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
             
-        return jsonify({'entry_id': result.inserted_id}), 202
+        return jsonify({'_id': result.inserted_id}), 202
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
