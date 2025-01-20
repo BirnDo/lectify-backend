@@ -16,6 +16,7 @@ from bson import ObjectId
 
 app = Flask(__name__)
 app.config['JWT_KEY'] = 'incredibly_secret_jwt_key'
+app.config['MONGODB_CONNECTION_STRING'] = os.getenv('MONGODB_CONNECTION_STRING')
 app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024 # 1000MB
 openai.api_key = os.getenv('OPENAI_API_KEY')
 executor = ThreadPoolExecutor(max_workers=5)
@@ -30,7 +31,7 @@ app.json_encoder = MongoJSONEncoder
 task_status = {}
 
 try:
-    uri = "mongodb://lectify-mongo-db:8ekyMVGjqKEZy5LIfvvmcBaEXJjS4cwSSxnX9zBOZquVk8dbt0v2JUZQTUoFh9Qjx1OnaQCoSSN0ACDbQ92lhw==@lectify-mongo-db.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@lectify-mongo-db@"
+    uri = app.config['MONGODB_CONNECTION_STRING']
     client = MongoClient(uri)
     database = client["lectify-mongo-db"]
     user_collection = database["user"]
