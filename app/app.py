@@ -129,7 +129,12 @@ def history():
     token = request.headers.get('Authorization').split(" ")[1]
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
-        return jsonify(list(transcription_collection.find({'user_id': decoded['_id']})))
+        entries = transcription_collection.find({'user_id': decoded['_id']})
+        result = []
+        for entry in entries:
+            entry['_id'] = str(entry['_id'])
+            result.append(entry)
+        return jsonify(result)
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
