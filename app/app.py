@@ -11,6 +11,7 @@ import ffmpeg
 import whisper
 from pymongo import MongoClient
 from bson import ObjectId
+from flask_cors import CORS
 
 
 
@@ -20,6 +21,7 @@ app.config['MONGODB_CONNECTION_STRING'] = os.getenv('MONGODB_CONNECTION_STRING')
 app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024 # 1000MB
 openai.api_key = os.getenv('OPENAI_API_KEY')
 executor = ThreadPoolExecutor(max_workers=5)
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 
 class MongoJSONEncoder(JSONEncoder):
     def default(self, obj):
@@ -133,6 +135,10 @@ def history():
     except jwt.InvalidTokenError:
         return jsonify({'error': 'Invalid token'}), 401
 
+@app.route("/health", methods=['GET'])
+def health():
+    return "", 200
+
 @app.route('/entry', methods=['GET'])
 def entry():
     entry_id = request.args.get('_id')
@@ -147,5 +153,5 @@ def entry():
         return jsonify({'error': 'Invalid token'}), 401
 
 if __name__ == '__main__':
-    app.run(socket.gethostbyname(socket.gethostname()))
+    app.run("0.0.0.0", port=5000)
     

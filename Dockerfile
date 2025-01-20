@@ -1,11 +1,11 @@
-FROM continuumio/miniconda3
+FROM python:3.10
 
 EXPOSE 5000
 COPY app app
-COPY env.yml env.yml
+COPY requirements.txt requirements.txt
 RUN apt-get update && apt-get install -y curl ffmpeg
-RUN conda env create --file env.yml -n lectify-backend && conda init
-RUN python -m pip install jwt ffmpeg-python openai-whisper
-SHELL ["conda", "run", "-n", "lectify-backend", "/bin/bash", "-c"]
+RUN python -m pip install --upgrade pip
+RUN pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu --no-input
+RUN pip install -r requirements.txt
 
-ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "lectify-backend", "python", "app/app.py"]
+ENTRYPOINT ["python", "./app/app.py"]
