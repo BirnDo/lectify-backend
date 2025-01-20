@@ -146,7 +146,7 @@ def entry():
 
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
-        return jsonify({list(transcription_collection.find({'user_id': decoded['_id'], '_id': entry_id}))})
+        return jsonify({list(transcription_collection.find({'user_id': decoded['_id'], '_id': ObjectId(entry_id)}))})
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
