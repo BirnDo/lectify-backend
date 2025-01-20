@@ -91,7 +91,7 @@ def transcribe(path, model):
     return result["text"]
 
 def summarize(input, summaryType):
-    completion = openai.ChatCompletion.create(
+    completion = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "user", "content": f"Provide a {summaryType} summary of the following text: " + input}
