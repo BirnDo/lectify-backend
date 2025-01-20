@@ -119,7 +119,7 @@ def login():
     user = user_collection.find_one({"username": username, "password": password})
     if user is not None:
         token = jwt.encode({'_id': str(user['_id']), 
-                            'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)},
+                            'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)},
                            app.config['JWT_KEY'], algorithm='HS256')
         return jsonify({'token': token})
     return jsonify({'error': 'Invalid credentials'}), 401
