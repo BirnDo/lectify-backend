@@ -21,7 +21,7 @@ app.config['MONGODB_CONNECTION_STRING'] = os.getenv('MONGODB_CONNECTION_STRING')
 app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024 # 1000MB
 openai.api_key = os.getenv('OPENAI_API_KEY')
 executor = ThreadPoolExecutor(max_workers=5)
-CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 class MongoJSONEncoder(JSONEncoder):
     def default(self, obj):
