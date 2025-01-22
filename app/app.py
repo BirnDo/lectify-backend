@@ -21,7 +21,7 @@ app.config['MONGODB_CONNECTION_STRING'] = os.getenv('MONGODB_CONNECTION_STRING')
 app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024 # 1000MB
 openai.api_key = os.getenv('OPENAI_API_KEY')
 executor = ThreadPoolExecutor(max_workers=5)
-CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 class MongoJSONEncoder(JSONEncoder):
     def default(self, obj):
@@ -59,12 +59,12 @@ def process():
             model = request.args.get('model')
             summaryType = request.args.get('summaryType')
             
-            result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
+            result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'transcriptionQuality': model, 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
             print("Inserted transcription into database: ", result.inserted_id)
             print("starting threaded transcription and summarization")
             executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
             
-        return jsonify({'entry_id': result.inserted_id}), 202
+        return jsonify({'_id': str(result.inserted_id)}), 202
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
@@ -91,7 +91,7 @@ def transcribe(path, model):
     return result["text"]
 
 def summarize(input, summaryType):
-    completion = openai.ChatCompletion.create(
+    completion = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "user", "content": f"Provide a {summaryType} summary of the following text: " + input}
@@ -119,7 +119,7 @@ def login():
     user = user_collection.find_one({"username": username, "password": password})
     if user is not None:
         token = jwt.encode({'_id': str(user['_id']), 
-                            'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)},
+                            'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)},
                            app.config['JWT_KEY'], algorithm='HS256')
         return jsonify({'token': token})
     return jsonify({'error': 'Invalid credentials'}), 401
@@ -129,7 +129,12 @@ def history():
     token = request.headers.get('Authorization').split(" ")[1]
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
-        return jsonify({list(transcription_collection.find({'user_id': decoded['_id']}))})
+        entries = transcription_collection.find({'user_id': decoded['_id']})
+        result = []
+        for entry in entries:
+            entry['_id'] = str(entry['_id'])
+            result.append(entry)
+        return jsonify(result)
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
@@ -146,7 +151,12 @@ def entry():
 
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
-        return jsonify({list(transcription_collection.find({'user_id': decoded['_id'], '_id': entry_id}))})
+        entry = transcription_collection.find_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)})
+        if entry:
+            entry['_id'] = str(entry['_id'])  # Convert ObjectId to string
+            return jsonify(entry)
+        else:
+            return jsonify({'error': 'Entry not found'}), 404
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
