@@ -1,7 +1,7 @@
 import datetime
 import os
 import tempfile
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, make_response
 from json import JSONEncoder
 from concurrent.futures import ThreadPoolExecutor
 import socket
@@ -21,7 +21,7 @@ app.config['MONGODB_CONNECTION_STRING'] = os.getenv('MONGODB_CONNECTION_STRING')
 app.config['MAX_CONTENT_LENGTH'] = 1000 * 1024 * 1024 # 1000MB
 openai.api_key = os.getenv('OPENAI_API_KEY')
 executor = ThreadPoolExecutor(max_workers=5)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, supports_credentials=True, origins="*")
 
 class MongoJSONEncoder(JSONEncoder):
     def default(self, obj):
@@ -44,7 +44,7 @@ except Exception as e:
 
 @app.route('/process', methods=['POST'])
 def process():
-    token = request.headers.get('Authorization').split(" ")[1]
+    token = request.cookies.get('jwt')
     try:
         user_id = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])['_id']
         
@@ -119,14 +119,28 @@ def login():
     user = user_collection.find_one({"username": username, "password": password})
     if user is not None:
         token = jwt.encode({'_id': str(user['_id']), 
-                            'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)},
+                            'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)},
                            app.config['JWT_KEY'], algorithm='HS256')
-        return jsonify({'token': token})
+        response = make_response(jsonify({'message': 'Login successful'}))
+        response.set_cookie('jwt', token, max_age=60*60, httponly=True)
+
+        return response
+    
     return jsonify({'error': 'Invalid credentials'}), 401
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    token = request.cookies.get('jwt')
+    if not token:
+        return jsonify({'message': 'No token to invalidate'}), 400
+    
+    response = jsonify({'message': 'Logged out successfully'})
+    response.set_cookie('jwt', '', max_age=0, httponly=True)
+    return response
 
 @app.route('/history', methods=['GET'])
 def history():
-    token = request.headers.get('Authorization').split(" ")[1]
+    token = request.cookies.get('jwt')
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
         entries = transcription_collection.find({'user_id': decoded['_id']})
@@ -147,8 +161,8 @@ def health():
 @app.route('/entry', methods=['GET'])
 def entry():
     entry_id = request.args.get('_id')
-    token = request.headers.get('Authorization').split(" ")[1]
-
+    token = request.cookies.get('jwt')
+   
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
         entry = transcription_collection.find_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)})
