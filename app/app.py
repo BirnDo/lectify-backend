@@ -165,11 +165,14 @@ def entry():
    
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
-        entry = transcription_collection.find_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)})
-        if entry:
-            entry['_id'] = str(entry['_id'])  # Convert ObjectId to string
-            return jsonify(entry)
-        else:
+        try:
+            entry = transcription_collection.find_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)})
+            if entry:
+                entry['_id'] = str(entry['_id'])  # Convert ObjectId to string
+                return jsonify(entry)
+            else:
+                raise LookupError
+        except:
             return jsonify({'error': 'Entry not found'}), 404
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
@@ -177,5 +180,5 @@ def entry():
         return jsonify({'error': 'Invalid token'}), 401
 
 if __name__ == '__main__':
-    app.run("0.0.0.0", port=5000)
+    app.run("0.0.0.0", port=5001)
     
