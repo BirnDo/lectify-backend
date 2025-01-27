@@ -2,6 +2,7 @@ import datetime
 import os
 import tempfile
 import flask
+import bcrypt
 from flask import Flask, jsonify, request, make_response
 from json import JSONEncoder
 from concurrent.futures import ThreadPoolExecutor
@@ -49,7 +50,7 @@ def process():
     try:
         user_id = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])['_id']
 
-        inserted_ids = set()
+        inserted_ids = []
 
         for file in uploaded_files:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", dir='./temp') as temp_file:
@@ -66,10 +67,10 @@ def process():
                 result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'transcriptionQuality': model, 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
                 print("Inserted transcription into database: ", result.inserted_id)
                 print("starting threaded transcription and summarization")
-                inserted_ids.add(str(result.inserted_id))
+                inserted_ids.append(str(result.inserted_id))
                 executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
             
-        return jsonify({'_id': str(inserted_ids)}), 202
+        return jsonify({"ids": inserted_ids}), 202
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
@@ -121,30 +122,40 @@ def register():
     data = request.json
     username = data.get('username')
     password = data.get('password')
+    hashed_password = hash_password(password)
 
     existing_user = user_collection.find_one({'username': username})
     if existing_user is not None:
         return jsonify({'message': 'User already exists'}), 409
     else:
-        user_collection.insert_one({'username': username, 'password': password})
+        user_collection.insert_one({'username': username, 'password': hashed_password})
         return jsonify({'message': 'User created'}), 201
+
+def hash_password(plain_password: str) -> str:
+    # Generate a hash for the password
+    hashed = bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt())
+    return hashed.decode('utf-8')
 
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
     username = data.get('username')
-    password = data.get('password')
-    user = user_collection.find_one({"username": username, "password": password})
-    if user is not None:
-        token = jwt.encode({'_id': str(user['_id']), 
-                            'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)},
-                           app.config['JWT_KEY'], algorithm='HS256')
-        response = make_response(jsonify({'message': 'Login successful'}))
-        response.set_cookie('jwt', token, max_age=60*60, httponly=True)
+    user = user_collection.find_one({"username": username})
 
-        return response
-    
-    return jsonify({'error': 'Invalid credentials'}), 401
+    if not user:
+        return jsonify({'message': 'Invalid credentials'}), 401
+
+    password = data.get('password')
+    if not bcrypt.checkpw(password.encode('utf-8'), str(user.get('password')).encode('utf-8')):
+        return jsonify({'message': 'Invalid credentials'}), 401
+
+    token = jwt.encode({'_id': str(user['_id']),
+                        'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)},
+                       app.config['JWT_KEY'], algorithm='HS256')
+    response = make_response(jsonify({'message': 'Login successful'}))
+    response.set_cookie('jwt', token, max_age=60*60, httponly=True)
+
+    return response
 
 @app.route('/logout', methods=['POST'])
 def logout():

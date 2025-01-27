@@ -5,3 +5,4 @@ openai-whisper==20240930
 openai==1.59.9
 pymongo==4.10.1
 flask_cors
+bcrypt
