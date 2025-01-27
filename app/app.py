@@ -100,7 +100,7 @@ def summarize(transcription, summaryType):
     completion = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "user", "content": f"Provide a {summaryType} summary of the following text: " + transcription}
+            {"role": "user", "content": f"Provide a {summaryType} summary in the language of the following text, do NOT translate it to englisch if it was german: " + transcription}
         ]
     )
 
