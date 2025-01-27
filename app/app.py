@@ -42,80 +42,9 @@ try:
 except Exception as e:
     raise Exception("The following error occurred: ", e)
 
-@app.route('/process', methods=['POST'])
-def process():
-    token = request.cookies.get('jwt')
-    uploaded_files = flask.request.files.getlist("files") # Get all files with the key 'files'
-
-    try:
-        user_id = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])['_id']
-
-        inserted_ids = []
-
-        for file in uploaded_files:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", dir='./temp') as temp_file:
-                temp_file.write(file.stream.read())
-                temp_file_path = temp_file.name
-
-                print("File saved to temporary file: ", temp_file_path)
-
-                fileName = file.filename
-                title = request.args.get('title')
-                model = request.args.get('model')
-                summaryType = request.args.get('summaryType')
-
-                result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'transcriptionQuality': model, 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
-                print("Inserted transcription into database: ", result.inserted_id)
-                print("starting threaded transcription and summarization")
-                inserted_ids.append(str(result.inserted_id))
-                executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
-            
-        return jsonify({"ids": inserted_ids}), 202
-    except jwt.ExpiredSignatureError:
-        return jsonify({'error': 'Token expired'}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
-
-
-def transcribe_and_summarize(user_id, transcription_id, temp_file_path, model, summaryType):
-    print("starting transcription")
-    transcribed_text = transcribe(temp_file_path, model)
-    print("starting summarization")
-    summary = summarize(transcribed_text, summaryType)
-
-    update_operation = { '$set' : 
-        { 'completed' : True, 'transcriptionText' : transcribed_text, 'summaryText' : summary }
-    }
-    transcription_collection.update_one({'_id': transcription_id, 'user_id': user_id}, update_operation)
-    print("deleting temporary file:", temp_file_path)
-    os.remove(temp_file_path)
-
-
-def transcribe(path, model):
-    model = whisper.load_model(model) # model has to be: tiny, base, small, medium, large
-    result = model.transcribe(path)
-    return result["text"]
-
-def summarize(transcription, summaryType):
-    completion = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "user", "content": f"Provide a {summaryType} summary in the language of the following text, do NOT translate it to englisch if it was german: " + transcription}
-        ]
-    )
-
-    return completion.choices[0].message.content
-
-def get_mp3_duration(file_path):
-    print("get_mp3_duration: ", file_path)
-    try:
-        probe = ffmpeg.probe(file_path)
-        duration = float(probe['format']['duration'])
-    except ffmpeg._run.Error as e:
-        print("Error: ", e.stderr)
-    
-    return duration
-
+@app.route("/health", methods=['GET'])
+def health():
+    return "", 200
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -167,25 +96,64 @@ def logout():
     response.set_cookie('jwt', '', max_age=0, httponly=True)
     return response
 
-@app.route('/history', methods=['GET'])
-def history():
+@app.route('/user', methods=['GET'])
+def get_user():
     token = request.cookies.get('jwt')
+    
+    if not token:
+        return jsonify({'message': 'Not authenticated'}), 401
+        
     try:
         decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
-        entries = transcription_collection.find({'user_id': decoded['_id']})
-        result = []
-        for entry in entries:
-            entry['_id'] = str(entry['_id'])
-            result.append(entry)
-        return jsonify(result)
+        
+        user = user_collection.find_one({'_id': ObjectId(decoded['_id'])})
+        
+        if not user:
+            return jsonify({'message': 'User not found'}), 404
+            
+        return jsonify({
+            'username': user['username'],
+            '_id': str(user['_id'])
+        })
+        
+    except jwt.ExpiredSignatureError:
+        return jsonify({'message': 'Token expired'}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({'message': 'Invalid token'}), 401
+    
+@app.route('/process', methods=['POST'])
+def process():
+    token = request.cookies.get('jwt')
+    uploaded_files = flask.request.files.getlist("files") # Get all files with the key 'files'
+
+    try:
+        user_id = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])['_id']
+
+        inserted_ids = []
+
+        for file in uploaded_files:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", dir='./temp') as temp_file:
+                temp_file.write(file.stream.read())
+                temp_file_path = temp_file.name
+
+                print("File saved to temporary file: ", temp_file_path)
+
+                fileName = file.filename
+                title = request.args.get('title')
+                model = request.args.get('model')
+                summaryType = request.args.get('summaryType')
+
+                result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'transcriptionQuality': model, 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
+                print("Inserted transcription into database: ", result.inserted_id)
+                print("starting threaded transcription and summarization")
+                inserted_ids.append(str(result.inserted_id))
+                executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
+            
+        return jsonify({"ids": inserted_ids}), 202
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
         return jsonify({'error': 'Invalid token'}), 401
-
-@app.route("/health", methods=['GET'])
-def health():
-    return "", 200
 
 @app.route('/entry', methods=['GET'])
 def get_entry():
@@ -252,7 +220,7 @@ def share_entry():
         except jwt.InvalidTokenError:
             return jsonify({'error': 'Invalid token'}), 401
 
-        result = transcription_collection.update_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)}, {"$set":  {'public': is_public}})
+        result = transcription_collection.update_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)}, {"$set":  {'isPublic': is_public}})
 
         if result.modified_count == 1:
             return jsonify({'message': 'Entry ' + 'public 'if is_public else 'private'}), 200
@@ -260,6 +228,65 @@ def share_entry():
             raise LookupError
     except:
         return jsonify({'error': 'Entry not found'}), 404
+
+@app.route('/history', methods=['GET'])
+def history():
+    token = request.cookies.get('jwt')
+    try:
+        decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
+        entries = transcription_collection.find({'user_id': decoded['_id']})
+        result = []
+        for entry in entries:
+            entry['_id'] = str(entry['_id'])
+            result.append(entry)
+        return jsonify(result)
+    except jwt.ExpiredSignatureError:
+        return jsonify({'error': 'Token expired'}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({'error': 'Invalid token'}), 401
+
+
+
+
+
+def transcribe_and_summarize(user_id, transcription_id, temp_file_path, model, summaryType):
+    print("starting transcription")
+    transcribed_text = transcribe(temp_file_path, model)
+    print("starting summarization")
+    summary = summarize(transcribed_text, summaryType)
+
+    update_operation = { '$set' : 
+        { 'completed' : True, 'transcriptionText' : transcribed_text, 'summaryText' : summary }
+    }
+    transcription_collection.update_one({'_id': transcription_id, 'user_id': user_id}, update_operation)
+    print("deleting temporary file:", temp_file_path)
+    os.remove(temp_file_path)
+
+
+def transcribe(path, model):
+    model = whisper.load_model(model) # model has to be: tiny, base, small, medium, large
+    result = model.transcribe(path)
+    return result["text"]
+
+def summarize(transcription, summaryType):
+    completion = openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "user", "content": f"Provide a {summaryType} summary in the language of the following text, do NOT translate it to englisch if it was german: " + transcription}
+        ]
+    )
+
+    return completion.choices[0].message.content
+
+def get_mp3_duration(file_path):
+    print("get_mp3_duration: ", file_path)
+    try:
+        probe = ffmpeg.probe(file_path)
+        duration = float(probe['format']['duration'])
+    except ffmpeg._run.Error as e:
+        print("Error: ", e.stderr)
+    
+    return duration
 
 if __name__ == '__main__':
     app.run("0.0.0.0", port=5001)
