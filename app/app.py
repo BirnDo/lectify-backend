@@ -1,10 +1,10 @@
 import datetime
 import os
 import tempfile
+import flask
 from flask import Flask, jsonify, request, make_response
 from json import JSONEncoder
 from concurrent.futures import ThreadPoolExecutor
-import socket
 import jwt
 import openai
 import ffmpeg
@@ -12,7 +12,6 @@ import whisper
 from pymongo import MongoClient
 from bson import ObjectId
 from flask_cors import CORS
-
 
 
 app = Flask(__name__)
@@ -45,26 +44,32 @@ except Exception as e:
 @app.route('/process', methods=['POST'])
 def process():
     token = request.cookies.get('jwt')
+    uploaded_files = flask.request.files.getlist("files") # Get all files with the key 'files'
+
     try:
         user_id = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])['_id']
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", dir='./temp') as temp_file:
-            temp_file.write(request.data)
-            temp_file_path = temp_file.name
 
-            print("File saved to temporary file: ", temp_file_path)
+        inserted_ids = set()
 
-            fileName = request.args.get('fileName')
-            title = request.args.get('title')
-            model = request.args.get('model')
-            summaryType = request.args.get('summaryType')
+        for file in uploaded_files:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3", dir='./temp') as temp_file:
+                temp_file.write(file.stream.read())
+                temp_file_path = temp_file.name
+
+                print("File saved to temporary file: ", temp_file_path)
+
+                fileName = file.filename
+                title = request.args.get('title')
+                model = request.args.get('model')
+                summaryType = request.args.get('summaryType')
+
+                result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'transcriptionQuality': model, 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
+                print("Inserted transcription into database: ", result.inserted_id)
+                print("starting threaded transcription and summarization")
+                inserted_ids.add(str(result.inserted_id))
+                executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
             
-            result = transcription_collection.insert_one({'user_id': user_id, 'title': title, 'fileName': fileName, 'duration': get_mp3_duration(temp_file_path), 'transcriptionQuality': model, 'summaryType': summaryType, 'createdAt': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), 'completed': False, 'summaryText': None, 'transcriptionText': None})
-            print("Inserted transcription into database: ", result.inserted_id)
-            print("starting threaded transcription and summarization")
-            executor.submit(transcribe_and_summarize, user_id, result.inserted_id, temp_file_path, model, summaryType)
-            
-        return jsonify({'_id': str(result.inserted_id)}), 202
+        return jsonify({'_id': str(inserted_ids)}), 202
     except jwt.ExpiredSignatureError:
         return jsonify({'error': 'Token expired'}), 401
     except jwt.InvalidTokenError:
@@ -73,12 +78,12 @@ def process():
 
 def transcribe_and_summarize(user_id, transcription_id, temp_file_path, model, summaryType):
     print("starting transcription")
-    transcripted_text = transcribe(temp_file_path, model)
+    transcribed_text = transcribe(temp_file_path, model)
     print("starting summarization")
-    summary = summarize(transcripted_text, summaryType)
+    summary = summarize(transcribed_text, summaryType)
 
     update_operation = { '$set' : 
-        { 'completed' : True, 'transcriptionText' : transcripted_text, 'summaryText' : summary }
+        { 'completed' : True, 'transcriptionText' : transcribed_text, 'summaryText' : summary }
     }
     transcription_collection.update_one({'_id': transcription_id, 'user_id': user_id}, update_operation)
     print("deleting temporary file:", temp_file_path)
@@ -90,11 +95,11 @@ def transcribe(path, model):
     result = model.transcribe(path)
     return result["text"]
 
-def summarize(input, summaryType):
+def summarize(transcription, summaryType):
     completion = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "user", "content": f"Provide a {summaryType} summary of the following text: " + input}
+            {"role": "user", "content": f"Provide a {summaryType} summary of the following text: " + transcription}
         ]
     )
 
@@ -110,6 +115,19 @@ def get_mp3_duration(file_path):
     
     return duration
 
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+
+    existing_user = user_collection.find_one({'username': username})
+    if existing_user is not None:
+        return jsonify({'message': 'User already exists'}), 409
+    else:
+        user_collection.insert_one({'username': username, 'password': password})
+        return jsonify({'message': 'User created'}), 201
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -159,25 +177,78 @@ def health():
     return "", 200
 
 @app.route('/entry', methods=['GET'])
-def entry():
+def get_entry():
     entry_id = request.args.get('_id')
     token = request.cookies.get('jwt')
-   
+
     try:
-        decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
+        entry = transcription_collection.find_one({'_id': ObjectId(entry_id)})
+        if entry:
+            entry['_id'] = str(entry['_id'])  # Convert ObjectId to string
+        else:
+            raise LookupError
+    except:
+        return jsonify({'error': 'Entry not found'}), 404
+
+    if entry.get('public') is None or entry.get('public') is False:
         try:
-            entry = transcription_collection.find_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)})
-            if entry:
-                entry['_id'] = str(entry['_id'])  # Convert ObjectId to string
-                return jsonify(entry)
-            else:
-                raise LookupError
-        except:
-            return jsonify({'error': 'Entry not found'}), 404
-    except jwt.ExpiredSignatureError:
-        return jsonify({'error': 'Token expired'}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
+            decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        if entry['user_id'] == decoded['_id']:
+            return jsonify(entry)
+        else:
+            return jsonify({'error': 'Entry not shared and belongs to another user'}), 401
+    else:
+        return jsonify(entry)
+
+@app.route("/entry", methods=["DELETE"])
+def delete_entry():
+    entry_id = request.args.get('_id')
+    token = request.cookies.get('jwt')
+
+    try:
+        try:
+            decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        result = transcription_collection.delete_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)})
+
+        if result.deleted_count == 1:
+            return jsonify({'message': 'Entry deleted'}), 200
+        else:
+            raise LookupError
+    except:
+        return jsonify({'error': 'Entry not found'}), 404
+
+@app.route("/entry", methods=["PUT"])
+def share_entry():
+    entry_id = request.args.get('_id')
+    token = request.cookies.get('jwt')
+    is_public = request.json.get('isPublic')
+
+    try:
+        try:
+            decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        result = transcription_collection.update_one({'user_id': decoded['_id'], '_id': ObjectId(entry_id)}, {"$set":  {'public': is_public}})
+
+        if result.modified_count == 1:
+            return jsonify({'message': 'Entry ' + 'public 'if is_public else 'private'}), 200
+        else:
+            raise LookupError
+    except:
+        return jsonify({'error': 'Entry not found'}), 404
 
 if __name__ == '__main__':
     app.run("0.0.0.0", port=5001)
