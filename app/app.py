@@ -169,7 +169,7 @@ def get_entry():
     except:
         return jsonify({'error': 'Entry not found'}), 404
 
-    if entry.get('public') is None or entry.get('public') is False:
+    if entry.get('isPublic') is None or entry.get('isPublic') is False:
         try:
             decoded = jwt.decode(token, app.config['JWT_KEY'], algorithms=['HS256'])
         except jwt.ExpiredSignatureError:
